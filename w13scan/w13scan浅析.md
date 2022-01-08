@@ -1,172 +1,51 @@
 <!--
- * @Date: 2021-12-21 10:42:54
+ * @Date: 2022-01-07 15:30:19
  * @LastEditors: recar
- * @LastEditTime: 2022-01-07 15:28:40
+ * @LastEditTime: 2022-01-08 16:09:18
 -->
-## main
-### 先检测是否py3 `version_check()`
 
-### init
+# w13scan浅析
 
+w13scan 是一款由w8ay开发的python3的主被动扫描器  
+
+被动代理基于 `baseproxy.py` 作者是 `qiye`   
+
+主动扫描默认是没有爬虫的  
+
+这里分析将分为几个部分 基础模块 主动扫描 被动扫描 扫描模块 学习的地方  
+[toc]
+
+## 基础模块  
+
+### 一些环境检测和补丁
+
+#### version_check() 
+检测是否py3
+####  modulePath()  
+方法是如果是将这个w13scan.py打包成exe了的获取的路径 源自 sqlmap
+#### patch_all()补丁
+关闭https请求时的验证及 忽略urllib3的日志  
 ```python
-    root = modulePath()
-    cmdline = cmd_line_parser()
-    init(root, cmdline)
+def patch_all():
+    disable_warnings()
+    logging.getLogger("urllib3").setLevel(logging.CRITICAL)
+    ssl._create_default_https_context = ssl._create_unverified_context
+    Session.request = session_request
 ```
 
-#### `modulePath` 方法是如果是将这个w13scan.py打包成exe了的获取的路径 源自 sqlmap
-
-####  `cmd_line_parser` 是解析命令行参数  
-文件在 `lib/parse/cmdparse.py`  
-
-最后调用 `init(root, cmdline)`  
+#### 初始化
+初始化一些路径 配置 和共享数据等  
 
 ```python
-cinit(autoreset=True)
-setPaths(root)
-banner()
-_init_conf()  # 从config.py读取配置信息
-_merge_options(cmdline)  # 从cmdline读取配置
-_set_conf()
-initKb()
-initPlugins()
-_init_stdout()
-patch_all()
-```
-
-####  `cinit` 是 `from colorama import init as cinit`
-用的第三方库 `colorama` 控制台彩色输出 支持windows 
-`https://pypi.org/project/colorama/`  
-
-
-#### `setPaths(root)` 是这种所有的数据路径 
-```python
+# 路径
+# setPaths(root) 函数
 path.root = root
 path.certs = os.path.join(root, 'certs')
 path.scanners = os.path.join(root, 'scanners')
 path.data = os.path.join(root, "data")
 path.fingprints = os.path.join(root, "fingprints")
 path.output = os.path.join(root, "output")
-
-```
-这个path是 `from lib.core.data import path, KB, logger, conf`  也是可以看到跟sqlmap的设计类似  
-```python
-logger = LOGGER
-path = AttribDict()
-KB = AttribDict()
-conf = AttribDict()
-```
-
-为了多个脚本之间传递共用的数据  
-
-#### banner
-```python
-def banner():
-    msg = "w13scan v{}".format(VERSION)
-    sfw = True
-    s = milk_random_cow(msg, sfw=sfw)
-    dataToStdout(random_colorama(s) + "\n\n")
-
-```
-
-![](images/banner.jpg)
-
-这个很酷啊 有颜色和随机的图案  
-
-#### milk_random_cow 生成随机图案
-`from cowpy.cow import milk_random_cow`  
-
-
-#### _init_conf() 从config.py 读取配置信息
-
-路径 `lib/core/options.py#L105`
-导入config的变量
-
-```python
-from config import DEBUG, EXCLUDES, THREAD_NUM, LEVEL, \
-    TIMEOUT, \
-    RETRY, PROXY_CONFIG, PROXY_CONFIG_BOOL, DISABLE, ABLE, XSS_LIMIT_CONTENT_TYPE
-
-```
-#### config.py
-config.py
-```python
-# Default setting
-THREAD_NUM = 31  # 线程数量
-
-EXCLUDES = ["google", "lastpass", '.gov.']  # 扫描排除网址
-
-RETRY = 2  # 超时重试次数
-TIMEOUT = 10  # 超时时间
-LEVEL = 3  # 发包等级
-
-# 所有扫描请求可以转发到另外一个代理上
-PROXY_CONFIG_BOOL = False
-PROXY_CONFIG = {
-    # "http": "127.0.0.1:8080",
-    # "https": "127.0.0.1:8080"
-}
-ABLE = []  # 允许使用的插件
-DISABLE = []  # 不允许使用的插件
-
-XSS_LIMIT_CONTENT_TYPE = True  # 限制xss的content-type，为True时限制content-type为html，为False不限制
-
-# DEBUG
-DEBUG = False
-
-# REVERSE
-USE_REVERSE = False  # 使用反连平台将False改为True
-REVERSE_HTTP_IP = "127.0.0.1"  # 回连http IP地址，需要改为服务器ip，不能改为0.0.0.0，因为程序无法识别
-REVERSE_HTTP_PORT = 9999  # 回连http端口
-
-REVERSE_DNS = "dnslog.w13scan.hacking8.com"
-
-REVERSE_RMI_IP = "127.0.0.1"  # Java RMI 回连IP,需要改为服务器ip，不能改为0.0.0.0，因为程序无法识别
-REVERSE_RMI_PORT = 10002  # Java RMI 回连端口
-
-REVERSE_SLEEP = 5  # 反连后延时检测时间，单位是(秒)
-
-```
-
-
-#### _merge_options(cmdline) 从欧诺个cmdline读取配置
-
-将配置文件与cmd的参数合并一起
-都更新到 conf里
-
-#### _set_conf()
-规格化一下conf里的数据 
-
-里面有个随机UA
-
-```python
-def random_UA():
-    ua_list = [
-        'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.101',
-        'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/38.0.2125.122',
-        'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.71',
-        'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95',
-        'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.1 (KHTML, like Gecko) Chrome/21.0.1180.71',
-        'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; QQDownload 732; .NET4.0C; .NET4.0E)',
-        'Mozilla/5.0 (Windows NT 5.1; U; en; rv:1.8.1) Gecko/20061208 Firefox/2.0.0 Opera 9.50',
-        'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:34.0) Gecko/20100101 Firefox/34.0',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 '
-        'Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) '
-        'Chrome/76.0.3809.100 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:54.0) Gecko/20100101 Firefox/68.0',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.13; rv:61.0) Gecko/20100101 Firefox/68.0',
-        'Mozilla/5.0 (X11; Linux i586; rv:31.0) Gecko/20100101 Firefox/68.0',
-    ]
-    return random.choice(ua_list)
-```
-
-
-#### initKb() 初始化公共数据
-类似sqlmap
-
-```python
+# kb
 KB['continue'] = False  # 线程一直继续
 KB['registered'] = dict()  # 注册的漏洞插件列表
 KB['fingerprint'] = dict()  # 注册的指纹插件列表
@@ -181,99 +60,166 @@ KB["running_plugins"] = dict()
 KB['finished'] = 0  # 完成数量
 KB["result"] = 0  # 结果数量
 KB["running"] = 0  # 正在运行数量
+
+#conf
+conf.version = False
+conf.debug = DEBUG
+conf.level = LEVEL
+conf.server_addr = None
+conf.url = None
+conf.url_file = None
+conf.proxy = PROXY_CONFIG
+conf.proxy_config_bool = PROXY_CONFIG_BOOL
+conf.timeout = TIMEOUT
+conf.retry = RETRY
+conf.html = False
+conf.json = False
+conf.random_agent = False
+conf.agent = DEFAULT_USER_AGENT
+conf.threads = THREAD_NUM
+conf.disable = DISABLE
+conf.able = ABLE
+# not in cmd parser params
+conf.excludes = EXCLUDES
+conf.XSS_LIMIT_CONTENT_TYPE = XSS_LIMIT_CONTENT_TYPE
+
+# 并且通过initPlugins函数加载检测插件
+for root, dirs, files in os.walk(path.scanners):
+    files = filter(lambda x: not x.startswith("__") and x.endswith(".py"), files)
+    for _ in files:
+        q = os.path.splitext(_)[0]
+        if conf.able and q not in conf.able and q != 'loader':
+            continue
+        if conf.disable and q in conf.disable:
+            continue
+        filename = os.path.join(root, _)
+        mod = load_file_to_module(filename)
+        try:
+            mod = mod.W13SCAN()
+            mod.checkImplemennted()
+            plugin = os.path.splitext(_)[0]
+            plugin_type = os.path.split(root)[1]
+            relative_path = ltrim(filename, path.root)
+            if getattr(mod, 'type', None) is None:
+                setattr(mod, 'type', plugin_type)
+            if getattr(mod, 'path', None) is None:
+                setattr(mod, 'path', relative_path)
+            KB["registered"][plugin] = mod
+        except PluginCheckError as e:
+            logger.error('Not "{}" attribute in the plugin:{}'.format(e, filename))
+        except AttributeError:
+            logger.error('Filename:{} not class "{}"'.format(filename, 'W13SCAN'))
+logger.info('Load scanner plugins:{}'.format(len(KB["registered"])))
+
+# 加载指纹
+num = 0
+for root, dirs, files in os.walk(path.fingprints):
+    files = filter(lambda x: not x.startswith("__") and x.endswith(".py"), files)
+    for _ in files:
+        filename = os.path.join(root, _)
+        if not os.path.exists(filename):
+            continue
+        name = os.path.split(os.path.dirname(filename))[-1]
+        mod = load_file_to_module(filename)
+
+        if not getattr(mod, 'fingerprint'):
+            logger.error("filename:{} load faild,not function 'fingerprint'".format(filename))
+            continue
+        if name not in KB["fingerprint"]:
+            KB["fingerprint"][name] = []
+        KB["fingerprint"][name].append(mod)
+        num += 1
+
+logger.info('Load fingerprint plugins:{}'.format(num))
+
 ```
 
-#### initPlugins() 加载检测插件
-
-```python
-def initPlugins():
-    # 加载检测插件
-    for root, dirs, files in os.walk(path.scanners):
-        files = filter(lambda x: not x.startswith("__") and x.endswith(".py"), files)
-        for _ in files:
-            q = os.path.splitext(_)[0]
-            if conf.able and q not in conf.able and q != 'loader':
-                continue
-            if conf.disable and q in conf.disable:
-                continue
-            filename = os.path.join(root, _)
-            mod = load_file_to_module(filename)
-            try:
-                # 每个插件调用 W13SCAN 方法
-                # 其实每个插件的类名就叫 W13SCAN 那mod就是实例化的了
-                mod = mod.W13SCAN()
-                # 每个插件调用 checkImplemennted 方法
-                # 检验插件是否有名字 name
-                # 是所有插件基础类的方法
-                mod.checkImplemennted()
-                plugin = os.path.splitext(_)[0]
-                plugin_type = os.path.split(root)[1]
-                relative_path = ltrim(filename, path.root)
-                if getattr(mod, 'type', None) is None:
-                    setattr(mod, 'type', plugin_type)
-                if getattr(mod, 'path', None) is None:
-                    setattr(mod, 'path', relative_path)
-                KB["registered"][plugin] = mod
-            except PluginCheckError as e:
-                logger.error('Not "{}" attribute in the plugin:{}'.format(e, filename))
-            except AttributeError:
-                logger.error('Filename:{} not class "{}"'.format(filename, 'W13SCAN'))
-    logger.info('Load scanner plugins:{}'.format(len(KB["registered"])))
-
-    # 加载指纹识别插件
-    num = 0
-    for root, dirs, files in os.walk(path.fingprints):
-        files = filter(lambda x: not x.startswith("__") and x.endswith(".py"), files)
-        for _ in files:
-            filename = os.path.join(root, _)
-            if not os.path.exists(filename):
-                continue
-            name = os.path.split(os.path.dirname(filename))[-1]
-            mod = load_file_to_module(filename)
-
-            if not getattr(mod, 'fingerprint'):
-                logger.error("filename:{} load faild,not function 'fingerprint'".format(filename))
-                continue
-            if name not in KB["fingerprint"]:
-                KB["fingerprint"][name] = []
-            KB["fingerprint"][name].append(mod)
-            num += 1
-
-    logger.info('Load fingerprint plugins:{}'.format(num))
-
-```
-
-##### load_file_to_module
-
-又学到一种加载的方式  
-使用util通过模块的名字和路径来导入模块  
-
-```python
-    module_name = 'plugin_{0}'.format(get_filename(file_path, with_ext=False))
-    spec = importlib.util.spec_from_file_location(module_name, file_path, loader=PocLoader(module_name, file_path))
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-```
-
-#### _init_stdout() 输出一些指定的信息
-不扫描网址 指定扫描插件 指定使用插件
-
-
-#### patch_all()
-关闭https请求时的验证及 忽略urllib3的日志  
-```python
-def patch_all():
-    disable_warnings()
-    logging.getLogger("urllib3").setLevel(logging.CRITICAL)
-    ssl._create_default_https_context = ssl._create_unverified_context
-    Session.request = session_request
-```
+最后将初始化的数据与配置文件的 控制台传递的参数合并 作为程序初始的数据  
+这里例如KB的设计方式和一些补丁函数应该是参考了 `sqlmap`  
 
 
 ## 主动扫描
 
-主动扫描输入url 或者url文件
+通过输入url或者url文件  
+请求后通过 `task_push_from_name` 函数创建个loader插件的任务  
+```python
+for domain in urls:
+    try:
+        req = requests.get(domain)
+    except Exception as e:
+        logger.error("request {} faild,{}".format(domain, str(e)))
+        continue
+    fake_req = FakeReq(domain, {}, HTTPMETHOD.GET, "")
+    fake_resp = FakeResp(req.status_code, req.content, req.headers)
+    task_push_from_name('loader', fake_req, fake_resp)
+```
+
+### FakeReq
+`lib/parse/parse_request.py`
+
+是对请求进行解析成各种字段
+
+### FakeResp 解析响应
+`lib/parse/parse_response.py`
+
+与req同理进行封装
+
+上面两个里面有很多有用的方法 通过这两个类对http的请求和响应进行字段拆分 方便后续插件使用  
+
+
+
+## 被动扫描
+
+```python
+    KB["continue"] = True
+    # 启动漏洞扫描器
+    scanner = threading.Thread(target=start)
+    scanner.setDaemon(True)
+    scanner.start()
+    # 启动代理服务器
+    baseproxy = AsyncMitmProxy(server_addr=conf.server_addr, https=True)
+
+    try:
+        baseproxy.serve_forever()
+    except KeyboardInterrupt:
+        scanner.join(0.1)
+        threading.Thread(target=baseproxy.shutdown, daemon=True).start()
+        deinit()
+        print("\n[*] User quit")
+    baseproxy.server_close()
+```
+
+是以代理形式的 那么我们需要看下被动代理创建任务的地方  
+位置是在 `W13SCAN/lib/proxy/baseproxy.py#L473`的 `do_GET`方法  
+将这个方法改成了所有的get post方法都使用这个`do_get`方法   
+```python
+# baseproxy.py#566
+do_HEAD = do_GET
+do_POST = do_GET
+do_PUT = do_GET
+do_DELETE = do_GET
+do_OPTIONS = do_GET
+```
+
+在请求响应完这里推了任务  
+```python
+req = FakeReq(url, request._headers, method, request.get_body_data().decode('utf-8'))
+resp = FakeResp(int(response.status), response.get_body_data(), response._headers)
+KB['task_queue'].put(('loader', req, resp))
+```
+
+
+也就是说被动代理是每次流量请求响应完就会推任务到loader 然后loader再次解析推送任务  
+
+
+主动扫描和被动扫描 都是获取url创建loader的任务  
+
+
+## 扫描模块
+
+### 什么时候启动扫描模块
+
+如果是主动扫描就在loader任务创建完成后启动  
 ```python
 for domain in urls:
     try:
@@ -287,165 +233,27 @@ for domain in urls:
 start()
 ```
 
-先发起一个请求获取 req
-`req = requests.get(domain)`
-
-
-### FakeReq
-`lib/parse/parse_request.py`
-
-是对请求进行解析成各种字段
-
-
-#### 解析post数据类型
-很有意思写了很多个正则 然后匹配
-
+如果是被动扫描就在开始通过现场创建扫描模块即start方法  
 ```python
-def _analysis_post(self):
-    post_data = unquote(self._body)
-    if re.search('([^=]+)=([^%s]+%s?)' % (DEFAULT_GET_POST_DELIMITER, DEFAULT_GET_POST_DELIMITER),
-                    post_data):
-        self._post_hint = POST_HINT.NORMAL
-        self._post_data = paramToDict(post_data, place=PLACE.POST, hint=self._post_hint)
-
-    elif re.search(JSON_RECOGNITION_REGEX, post_data):
-        self._post_hint = POST_HINT.JSON
-
-    elif re.search(XML_RECOGNITION_REGEX, post_data):
-        self._post_hint = POST_HINT.XML
-
-    elif re.search(JSON_LIKE_RECOGNITION_REGEX, post_data):
-        self._post_hint = POST_HINT.JSON_LIKE
-
-    elif re.search(ARRAY_LIKE_RECOGNITION_REGEX, post_data):
-        self._post_hint = POST_HINT.ARRAY_LIKE
-        self._post_data = paramToDict(post_data, place=PLACE.POST, hint=self.post_hint)
-
-    elif re.search(MULTIPART_RECOGNITION_REGEX, post_data):
-        self._post_hint = POST_HINT.MULTIPART
+KB["continue"] = True
+# 启动漏洞扫描器
+scanner = threading.Thread(target=start)
+scanner.setDaemon(True)
+scanner.start()
+# 启动代理服务器
+baseproxy = AsyncMitmProxy(server_addr=conf.server_addr, https=True)
 ```
-
-
-#### 将参数拆分为名称和值 返回字典
-
-```python
-def paramToDict(parameters, place=PLACE.GET, hint=POST_HINT.NORMAL) -> dict:
-    """
-    Split the parameters into names and values, check if these parameters
-    are within the testable parameters and return in a dictionary.
-    """
-
-    testableParameters = {}
-    if place == PLACE.COOKIE:
-        splitParams = parameters.split(DEFAULT_COOKIE_DELIMITER)
-        for element in splitParams:
-            parts = element.split("=")
-            if len(parts) >= 2:
-                testableParameters[parts[0]] = ''.join(parts[1:])
-    elif place == PLACE.GET:
-        splitParams = parameters.split(DEFAULT_GET_POST_DELIMITER)
-        for element in splitParams:
-            parts = element.split("=")
-            if len(parts) >= 2:
-                testableParameters[parts[0]] = ''.join(parts[1:])
-    elif place == PLACE.POST:
-        if hint == POST_HINT.NORMAL:
-            splitParams = parameters.split(DEFAULT_GET_POST_DELIMITER)
-            for element in splitParams:
-                parts = element.split("=")
-                if len(parts) >= 2:
-                    testableParameters[parts[0]] = ''.join(parts[1:])
-        elif hint == POST_HINT.ARRAY_LIKE:
-            splitParams = parameters.split(DEFAULT_GET_POST_DELIMITER)
-            for element in splitParams:
-                parts = element.split("=")
-                if len(parts) >= 2:
-                    key = parts[0]
-                    value = ''.join(parts[1:])
-                    if '[' in key:
-                        if key not in testableParameters:
-                            testableParameters[key] = []
-                        testableParameters[key].append(value)
-                    else:
-                        testableParameters[key] = value
-    return testableParameters
-```
-
-
-#### raw方法
-返回一个raw数据 类似burp的请求包  
-
-```python
-@property
-def raw(self):
-    # Build request
-    req_data = '%s %s %s\r\n' % (self.method, self._uri, self._request_version)
-    # Add headers to the request
-    for k, v in self._headers.items():
-        req_data += k + ': ' + v + '\r\n'
-    req_data += '\r\n'
-    req_data += self._body
-    return req_data
-```
-
-
-### FakeResp 解析响应
-`lib/parse/parse_response.py`
-
-与req同理进行封装
-
-#### raw
-
-```python
-@property
-def raw(self):
-    response_raw = "HTTP/1.1 {} \r\n".format(self._status_code)
-    for k, v in self._headers.items():
-        response_raw += "{}: {}\r\n".format(k, v)
-    response_raw += "\r\n"
-    response_raw += self.text
-    return response_raw
-```
-
-#### text
-获取响应体的内容 会自动解码
-编码的类似是探测的
-`self._decoding = chardet.detect(self._body)['encoding']  # 探测当前的编码`
-
-
-```python
-    @property
-    def text(self):
-        if self._decoding:
-            try:
-                return self._body.decode(self._decoding)
-            except Exception as e:
-                return self._body.decode('utf-8', "ignore")
-        return self._body.decode('utf-8', "ignore")
-```
-
-
-### task_push_from_name
-`W13SCAN/lib/controller/controller.py#L116`
-创建任务写到队列里
-插件名称 深拷贝req对象 深拷贝rsp对象
-这里的插件名称写死的就叫 loader
-`task_push_from_name('loader', fake_req, fake_resp)`  
-```python
-def task_push_from_name(pluginName, req, resp):
-    KB['task_queue'].put((pluginName, copy.deepcopy(req), copy.deepcopy(resp)))
-```
-
-
-### start
+### start方法
+ 
 `W13SCAN/lib/controller/controller.py#L66`
+```python
 def start():
     run_threads(conf.threads, task_run)
+```
 
-#### run_threads
-`W13SCAN/lib/controller/controller.py#L25`
-详细代码如下  
-从config的线程数来控制启动线程 并启动 指定的线程函数 `task_run`  
+#### run_threads 创建线程
+以配置设置的线程数俩创建线程  
+  
 ```python
 def run_threads(num_threads, thread_function, args: tuple = ()):
     threads = []
@@ -488,18 +296,14 @@ def run_threads(num_threads, thread_function, args: tuple = ()):
         dataToStdout('\n')
 ```
 
-
-
-#### task_run 
+#### task_run 运行任务
 `W13SCAN/lib/controller/controller.py#L70`
-需要多线程运行的线程函数  
 每个 task_run 就是从 KB["task_queue"] 中取task  
 然后加锁 拿插件的execute 传入 req和rsp 
 poc_module 是从注册的poc里深拷贝出来的  
 `poc_module.execute(request, response)`  
 更新任务数量 完成数+1 任务数-1  
-这里对 `KB.running_plugins[poc_module_name]` 其实存在一些疑惑??? 需要debug调试看下
-
+是每个线程就是一个消费者从 `task_queue` 队列中取任务执行  
 ```python
 def task_run():
     while KB["continue"] or not KB["task_queue"].empty():
@@ -527,11 +331,9 @@ def task_run():
     # set task delay
 ```
 
+#### printProgress 输出目前的扫描任务情况 
 
-
-#### printProgress
-
-输出目前的扫描任务情况  
+输出目前的扫描任务情况 
 
 ```python
 def printProgress():
@@ -547,8 +349,7 @@ def printProgress():
     KB.lock.release()
 ```
 
-主动扫描是 解析req和rsp 然后通过 `task_push_from_name` 生成task  
-插件名 这里给的是 `loader`  
+之前我们看到主被动扫描都是只创建了一个任务 `loader` 那说明详细的任务创建应该是在这里的  
 
 ### loader插件 主动扫描的解析插件 插件入口
 我们去找一下这个插件  
@@ -561,7 +362,7 @@ def printProgress():
 ![](images/loader.jpg)
 
 
-我们上面看到task里是调用的 `execute` 方法
+我们上面看到`task_run` 里是调用的 `execute` 方法
 
 直接看loader是没有这个方法的 那么应该是继承自 `PluginBase`  
 
@@ -573,7 +374,9 @@ def printProgress():
 根据 `conf.retry` 进程重试  
 如果最后是未知的异常 收集平台信息和报错到 output  
 这块信息再看issue的时候看到过  
-猜测会把未知的异常推到w13scan的issue里  
+通过函数 `createGithubIssue` 会把未知的异常推到w13scan的issue里  
+路径在 `W13SCAN/lib/core/common.py`  
+
 ![](images/issue.jpg)  
 
 
@@ -661,10 +464,9 @@ def execute(self, request: FakeReq, response: FakeResp):
 
 ```
 
-##### paramsCombination 组合dict参数,将相关类型参数组合成requests认识的,防止request将参数进行url转义
-
+##### paramsCombination 组合dict参数
+,将相关类型参数组合成requests认识的,防止request将参数进行url转义
 把数据按类型与payload进行插入到数据里  
-
 
 ```python
 def paramsCombination(self, data: dict, place=PLACE.GET, payloads=[], hint=POST_HINT.NORMAL, urlsafe='/\\'):
@@ -717,18 +519,79 @@ def paramsCombination(self, data: dict, place=PLACE.GET, payloads=[], hint=POST_
     return result
 ```
 
+##### ResultObject 统一的结果类
+返回的 result是 `W13SCAN/lib/core/output.py#L119`
 
+```python
+class ResultObject(object):
+    def __init__(self, baseplugin):
+        self.name = baseplugin.name
+        self.path = baseplugin.path
 
+        self.url = ""  # 插件url
+        self.result = ""  # 插件返回结果
+        self.type = ""  # 漏洞类型 枚举
+        self.detail = collections.OrderedDict()
 
+    def init_info(self, url, result, vultype):
+        self.url = url
+        self.result = result
+        self.type = vultype
 
+    def add_detail(self, name: str, request: str, response: str, msg: str, param: str, value: str, position: str):
+        if name not in self.detail:
+            self.detail[name] = []
+        self.detail[name].append({
+            "request": request,
+            "response": response,
+            "msg": msg,
+            "basic": {
+                "param": param,
+                "value": value,
+                "position": position
+            }
+        })
+
+    def output(self):
+        self.createtime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        return {
+            "name": self.name,
+            "path": self.path,
+            "url": self.url,
+            "result": self.result,
+            "type": self.type,
+            "createtime": self.createtime,
+            "detail": self.detail
+        }
+
+```
+
+##### self.success 输出漏洞
+```python
+def success(self, msg: ResultObject):
+    if isinstance(msg, ResultObject):
+        msg = msg.output()
+    elif isinstance(msg, dict):
+        pass
+    else:
+        raise PluginCheckError('self.success() not ResultObject')
+    KB.output.success(msg)
+```
 
 
 #### loader audit  loader插件最终执行的方法
 
 解析url 获取请求的url后缀分类  
 然后使用指纹识别 `m = mod.fingerprint(self.response.headers, self.response.text)`  
-然后推 一个爬虫任务 `PerServer`  
-分离出目录 然后每一个url目录都创建一个 `PerFolder` 任务
+然后推 一个扫描任务 `PerFile`通用的检查模块 `xss` `sql注入` `s2` `shiro`等 针对参数级 
+再推一个任务 `PerServer` `备份文件` `错误页面`等 针对域名级
+分离出目录 然后每一个url目录都创建一个 `PerFolder` 任务 `备份目录` `phpinfo` `源码泄露` 等 针对url  
+
+主要的检查模块还是在 `PerFile` 目录下面  
+这里分层这三个目录应该是仓库AWVS的方式来设计的  
+下面就是audit的代码  
+主要注意的是上述任务的创建都是通过 `KB["spiderset"].add` 的方式创建的  
+会先对url进行泛化去重才进行任务的创建  
 
 ```python
 def audit(self):
@@ -792,11 +655,9 @@ def audit(self):
             task_push('PerFolder', fake_req, fake_resp)
 ```
 
-##### PerServer 检测模块
+##### PerServer 检测模块 对每个domain的
 `W13SCAN/scanners/PerServer`  
-下面有很多 检测插件  
-
-##### backup_domain 基于域名的备份文件
+###### backup_domain 基于域名的备份文件
 
 使用tld `from tld import parse_tld`  
 
@@ -837,76 +698,14 @@ result.add_detail("payload请求", r.reqinfo, content.decode(errors='ignore'),
 self.success(result)
 ```
 
-###### ResultObject 统一的结果类
-返回的 result是 `W13SCAN/lib/core/output.py#L119`
-
-```python
-class ResultObject(object):
-    def __init__(self, baseplugin):
-        self.name = baseplugin.name
-        self.path = baseplugin.path
-
-        self.url = ""  # 插件url
-        self.result = ""  # 插件返回结果
-        self.type = ""  # 漏洞类型 枚举
-        self.detail = collections.OrderedDict()
-
-    def init_info(self, url, result, vultype):
-        self.url = url
-        self.result = result
-        self.type = vultype
-
-    def add_detail(self, name: str, request: str, response: str, msg: str, param: str, value: str, position: str):
-        if name not in self.detail:
-            self.detail[name] = []
-        self.detail[name].append({
-            "request": request,
-            "response": response,
-            "msg": msg,
-            "basic": {
-                "param": param,
-                "value": value,
-                "position": position
-            }
-        })
-
-    def output(self):
-        self.createtime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        return {
-            "name": self.name,
-            "path": self.path,
-            "url": self.url,
-            "result": self.result,
-            "type": self.type,
-            "createtime": self.createtime,
-            "detail": self.detail
-        }
-
-```
-
-###### self.success
-```python
-def success(self, msg: ResultObject):
-    if isinstance(msg, ResultObject):
-        msg = msg.output()
-    elif isinstance(msg, dict):
-        pass
-    else:
-        raise PluginCheckError('self.success() not ResultObject')
-    KB.output.success(msg)
-```
-
-
-##### errorpage 错误暴露信息  
+###### errorpage 错误暴露信息  
 
 `W13SCAN/scanners/PerServer/errorpage.py`  
 
 访问一个不存在的错误页面 可以从页面中获取信息  
 
 使用这个方法匹配 `sensitive_page_error_message_check`  
-
-###### sensitive_page_error_message_check
-
+里面是通过下面的正则匹配  
 error的匹配正则   
 ```python
 errors = [
@@ -951,20 +750,17 @@ errors = [
 ]
 ```
 
-##### http_smuggling http smuggling 走私攻击  
+###### http_smuggling http smuggling 走私攻击  
 
 这里直接return了  
 
-
-
-##### idea idea目录解析  
+###### idea idea目录解析  
 `W13SCAN/scanners/PerServer/idea.py`  
 
 先请求 xml  `payload = domain + ".idea/workspace.xml"` 然后判断后输出  
 
 
-
-##### iis_parse iis解析漏洞
+###### iis_parse iis解析漏洞
 `W13SCAN/scanners/PerServer/iis_parse.py`  
 请求 `domain/robots.txt/.php`  
 判断请求头 响应体  
@@ -974,7 +770,6 @@ r = requests.get(payload, headers=headers, allow_redirects=False)
 ContentType = r.headers.get("Content-Type", '')
 if 'html' in ContentType and "allow" in r.text:
 ```
-
 
 ###### net_xss net 通杀xss
 
@@ -992,8 +787,7 @@ url2 = domain + new_payload
 
 在响应中没有编码还是存就认为是存在的  
 
-
-##### swf_files 通用flash的xss
+###### swf_files 通用flash的xss
 
 多个swf加payload 然后计算返回的页面的md5值来判断  
 ```python
@@ -1024,10 +818,10 @@ for payload in FileList:
         md5_value = md5(req.content)
 ```
 
-#### PerFolder 检测模块
 
+##### PerFolder 检测模块 针对url的目录，会分隔目录分别访问
 
-##### backup_folder 扫描备份文件
+###### backup_folder 扫描备份文件
 `W13SCAN/scanners/PerFolder/backup_folder.py`  
 
 测试的路径 因为传入的时候是拆分了url的目录的所以这里会都测  
@@ -1035,8 +829,7 @@ for payload in FileList:
 ['bak.rar', 'bak.zip', 'backup.rar', 'backup.zip', 'www.zip', 'www.rar', 'web.rar', 'web.zip','wwwroot.rar','wwwroot.zip', 'log.zip', 'log.rar']
 ```
 
-
-##### directory_browse 判断是否是目录遍历  
+###### directory_browse 判断是否是目录遍历  
 `W13SCAN/scanners/PerFolder/directory_browse.py`  
 
 判断响应页面里有没有如下内容  
@@ -1050,8 +843,7 @@ flag_list = [
 ]
 ```
 
-
-##### phpinfo_craw 查看此目录下是否存在 phpinfo文件
+###### phpinfo_craw 查看此目录下是否存在 phpinfo文件
 `W13SCAN/scanners/PerFolder/phpinfo_craw.py`  
 
 请求这几个文件后判断是否有 `<title>phpinfo()</title>`  
@@ -1067,7 +859,8 @@ variants = [
 ]
 ```
 
-##### repository_leak 基于流量动态查找目录下源码泄露
+###### repository_leak 基于流量动态查找目录下源码泄露
+
 `W13SCAN/scanners/PerFolder/repository_leak.py`  
 请求key 判断响应里是否存在value  
 ```python
@@ -1080,14 +873,12 @@ flag = {
 }
 ```
 
+##### PerFile 检测模块 针对每个文件，包括参数
 
+###### analyze_parameter 反序列化参数分析插件
 
-#### PerFile 检测模块
+`from api import isJavaObjectDeserialization, isPHPObjectDeserialization, isPythonObjectDeserialization`  
 
-##### analyze_parameter 反序列化参数分析插件
-
-`from api import isJavaObjectDeserialization, isPHPObjectDeserialization, isPythonObjectDeserialization
-`  
 `W13SCAN/lib/helper/function.py#L27`  
 
 如下是通过value值来判断是否是反序列化的  
@@ -1137,7 +928,8 @@ def isPythonObjectDeserialization(value: str):
     return False
 ```
 
-##### backup_file 基于文件的备份扫描
+
+###### backup_file 基于文件的备份扫描
 `W13SCAN/scanners/PerFile/backup_file.py`
 对url动态生成 备份文件扫描
 ```python
@@ -1154,7 +946,7 @@ payloads.append(url + ".rar")
 payloads.append(url + ".zip")
 ```
 
-##### command_asp_code asp代码注入
+###### command_asp_code asp代码注入
 `W13SCAN/scanners/PerFile/command_asp_code.py`  
 只支持回显型的asp代码注入  
 
@@ -1167,7 +959,7 @@ _payloads = [
 ]
 ```
 
-#### command_php_code php代码注入
+###### command_php_code php代码注入
 `W13SCAN/scanners/PerFile/command_php_code.py`
 
 如果不是php的直接返回 是php的才进行处理  
@@ -1175,21 +967,18 @@ _payloads = [
 payload print MD5值  
 ```python
 _payloads = [
-    "print(md5({}));",
-    ";print(md5({}));",
-    "';print(md5({}));$a='",
-    "\";print(md5({}));$a=\"",
-    "${{@print(md5({}))}}",
-    "${{@print(md5({}))}}\\",
-    "'.print(md5({})).'"
+    "print(md5({}));".format(randint),
+    ";print(md5({}));".format(randint),
+    "';print(md5({}));$a='".format(randint),
+    "\";print(md5({}));$a=\"".format(randint),
+    "${{@print(md5({}))}}".format(randint),
+    "${{@print(md5({}))}}\\".format(randint),
+    "'.print(md5({})).'".format(randint)
 ]
 ```
 
-但是这里并没有把 本来计算的md5值加入进去进行匹配
-# TODO ??? 需要动态debug看下   
 
-
-#### command_system 系统命令注入  
+###### command_system 系统命令注入  
 `W13SCAN/scanners/PerFile/command_system.py`  
 
 
@@ -1221,12 +1010,11 @@ url_flag = {
 ```
 
 判断是否成功直接就响应中匹配回显  
-dnslog并没有做延迟处理 是直接去检验  
-这里可以优化 有些payload执行后会延迟一会才能被dnslog接收  
+在dnslog api中check函数里对 延迟进行了封装默认会延迟5s  
 
 
 
-#### directory_traversal 路径穿越插件  
+###### directory_traversal 路径穿越插件  
 `W13SCAN/scanners/PerFile/directory_traversal.py`  
 
 生成目录穿越的payload  
@@ -1280,7 +1068,7 @@ regexArray = [
 ```
 
 
-#### js_sensitive_content  js文件敏感内容匹配
+###### js_sensitive_content  js文件敏感内容匹配
 
 这里只匹配url后缀是js的  
 然后下面是正则payload  
@@ -1365,7 +1153,7 @@ regx = {
 ```
 
 
-#### jsonp JSONP寻找插件
+###### jsonp JSONP寻找插件
 
 这里是使用正则匹配的方式去判断的  
 
@@ -1445,7 +1233,8 @@ if not result2:
     return
 ```
 
-#### php_real_path 信息泄露
+
+###### php_real_path 信息泄露
 
 根据desc说明 对于一些php网站，将正常参数替换为[]可能造成真实信息泄漏  
 
@@ -1461,7 +1250,7 @@ for k, v in iterdata.items():
     data[key] = v
 ```
 
-#### poc_fastjson 打fastjson的
+###### poc_fastjson 打fastjson的
 
 如果是json的或者类似json的post请求的  
 `if self.requests.post_hint == POST_HINT.JSON or self.requests.post_hint == POST_HINT.JSON_LIKE:`  
@@ -1507,7 +1296,7 @@ fastjson_payload = {
 }
 ```
 
-#### shiro Shiro框架检测以及Key爆破
+###### shiro Shiro框架检测以及Key爆破
 
 
 先判断是否是 Shiro 直接从响应中判断  
@@ -1569,7 +1358,7 @@ reqHeader["Cookie"] = url_dict2str(_cookie, PLACE.COOKIE)
 则存在反序列化漏洞  
 
 
-#### sqli_bool 布尔注入检测
+###### sqli_bool 布尔注入检测
 
 
 先直接请求一次 然后去除多余数据后匹配相似度  
@@ -1658,106 +1447,8 @@ def generatePayloads(self, payloadTemplate, v, is_num=False):
     return payload_true, payload_false
 ```
 
-##### inject 注入函数
 
-把false payload写到参数的value中 然后发请求  
-判断响应页面与之前存储的响应相似度 一样的直接返回False  
-```python
-data[k] = payload_false
-r2 = self.req(positon, url_dict2str(data,positon))
-falsePage = self.removeDynamicContent(r2.text)
-
-try:
-    self.seqMatcher.set_seq1(self.resp_str)
-    self.seqMatcher.set_seq2(falsePage)
-    ratio_false = round(self.seqMatcher.quick_ratio(), 3)
-    if ratio_false == 1.0:
-        return False
-except (MemoryError, OverflowError):
-    return False
-```
-否则发起true payload 测试这次页面与之前存储的页面相似度  
-```python
-# true page
-data[k] = payload_true
-r = self.req(positon, url_dict2str(data,positon))
-truePage = self.removeDynamicContent(r.text)
-
-if truePage == falsePage:
-    return False
-
-try:
-    self.seqMatcher.set_seq1(self.resp_str or "")
-    self.seqMatcher.set_seq2(truePage or "")
-    ratio_true = round(self.seqMatcher.quick_ratio(), 3)
-except (MemoryError, OverflowError):
-    return False
-```
-
-如果false payload的响应一样与存储的不同 true payload与资产存储的相同 那么比较相似度  
-
-如果 true的相似度大于 0.98 并且 true的相似度大于 false的  
-并且 false的相似度小于等于 0.02 那么就将 `is_inject = True`  
-```python
-if ratio_true > self.UPPER_RATIO_BOUND and abs(ratio_true - ratio_false) > self.DIFF_TOLERANCE:
-    if ratio_false <= self.UPPER_RATIO_BOUND:
-        is_inject = True
-```
-
-如果 `is_inject=False` 并且true的相似度大于0.68 并且true的相似度大于false 那么将之前存储的响应页面 true的 false的 去掉多余的html标签  
-判断如果 之前存储的响应页面减 true的小于2 并且true的不等于false  
-并且true要大于false 那么就设置 `is_inject = True`  
-```python
-if not is_inject and ratio_true > 0.68 and ratio_true > ratio_false:
-    originalSet = set(getFilteredPageContent(self.resp_str, True, "\n").split("\n"))
-    trueSet = set(getFilteredPageContent(truePage, True, "\n").split("\n"))
-    falseSet = set(getFilteredPageContent(falsePage, True, "\n").split("\n"))
-
-    if len(originalSet - trueSet) <= 2 and trueSet != falseSet:
-        candidates = trueSet - falseSet
-        if len(candidates) > 0:
-            is_inject = True
-```
-
-也就是 设置  `is_inject = True`  有两个条件触发 一个是true fasle就是不同相似度也满足 算是完美的 另一种是 模糊的相似 这个0.68不知道是如何计算的 这个是宽泛一点的匹配  
-
-将匹配的payload key 相似度 等值存储ret并返回  
-```python
-if is_inject:
-    ret = []
-    ret.append({
-        "request": r.reqinfo,
-        "response": generateResponse(r),
-        "key": k,
-        "payload": payload_true,
-        "position": positon,
-        "desc": "发送True请求包与原网页相似度:{}".format(ratio_true)
-    })
-    ret.append({
-        "request": r2.reqinfo,
-        "response": generateResponse(r2),
-        "key": k,
-        "payload": payload_false,
-        "position": positon,
-        "desc": "发送False请求包与原网页相似度:{}".format(ratio_false)
-    })
-    return ret
-```
-
-然后会验证两次 两次都成功才认为是成功的  
-```python
-payload_true, payload_false = self.generatePayloads(payload, v, is_num)
-ret1 = self.inject(origin_dict, positon, k, payload_false, payload_true)
-if ret1:
-    payload_true, payload_false = self.generatePayloads(payload, v, is_num)
-    ret2 = self.inject(origin_dict, positon, k, payload_false, payload_true)
-    if ret2:
-        result = self.new_result()
-        result.init_info(self.requests.url, "SQL注入", VulType.SQLI)
-```
-
-
-#### sqli_error 报错注入
+###### sqli_error 报错注入
 
 报错注入的payload模板  
 
@@ -1787,7 +1478,7 @@ _payloads = [
 匹配上了的话就输出结果
 
 
-#### sqli_time 时间注入
+###### sqli_time 时间注入
 
 padyload模板  
 ```python
@@ -1848,7 +1539,11 @@ def generatePayloads(self, payloadTemplate, origin_dict):
 
 这两个都发起请求测试并计时  
 
-如果sleep5s的响应时间大于0s的大0 
+如果sleep 5s的响应时间大于5s 并且 sleep 5s的响应时间大于sleep 0s的响应时间 这里计算了时间相差  
+sleep5s的响应时间 - sleep0s的响应时间 保留小数点后两位  
+
+
+
 
 计算相差时间 `delta = round(delta1 - delta0, 3)`  
 这里的时间差用的是随机 本来的时间差到3中取值 这块不是很理解 ??? 
@@ -1856,7 +1551,8 @@ def generatePayloads(self, payloadTemplate, origin_dict):
 默认是验证两次即会测试两次来确认  
 
 
-#### ssti ssti模板注入探测
+
+###### ssti ssti模板注入探测
 
 
 先从响应页面中获取表单参数  
@@ -1970,7 +1666,7 @@ r1 = self.req(positon, data)
 都去判断两个随机数字的乘积是否存在到响应的页面中  
 
 
-#### struts2_032 Struts2-032远程代码执行
+###### struts2_032 Struts2-032远程代码执行
 
 直接打payload在data中    
 ```python
@@ -1997,7 +1693,8 @@ checks = [str(ran_check), '无法初始化设备 PRN', '??????? PRN', '<Struts2-
 ```
 存在则输出结果  
 
-#### struts2_045 Struts2-045远程代码执行
+
+###### struts2_045 Struts2-045远程代码执行
 
 payload写到请求头的 `Content-Type`里  
 
@@ -2020,7 +1717,7 @@ for payload in payloads:
 然后检验的字符串 `check = '<Struts2-vuln-Check>'`  
 
 
-#### unauth 未授权访问探测插件
+###### unauth 未授权访问探测插件
 
 先判断请求头里是否有以下字段 `["cookie", "token", "auth"]`  
 有的话才继续进行判断  
@@ -2029,7 +1726,7 @@ for payload in payloads:
 访问的页面与之前正常访问的相似度是多少来判断是否有未授权访问  
 
 
-#### webpack webpack源文件泄漏
+###### webpack webpack源文件泄漏
 
 先过滤需要 js后缀 然后拼接url 后面加 `.map`  
 再次访问如果返回状态码是`200`并且页面含有 `webpack:///`  
@@ -2045,7 +1742,6 @@ if self.requests.suffix.lower() == '.js':
                             "webpack:/// 在返回文本中", "", "", PLACE.GET)
         self.success(result)
 ```
-
 
 
 #### xss XSS语义化探测
@@ -2312,299 +2008,156 @@ payload = "*/{};/*".format(flag)
 
 
 
-## 被动扫描
+## 学习的地方 (可以抄)
+
+###  colorama 控制台彩色输出 支持windows 
+用的第三方库 `colorama` 控制台彩色输出 支持windows 
+`https://pypi.org/project/colorama/` 
+
+
+### 随机banner  
 
 ```python
-    KB["continue"] = True
-    # 启动漏洞扫描器
-    scanner = threading.Thread(target=start)
-    scanner.setDaemon(True)
-    scanner.start()
-    # 启动代理服务器
-    baseproxy = AsyncMitmProxy(server_addr=conf.server_addr, https=True)
+def banner():
+    msg = "w13scan v{}".format(VERSION)
+    sfw = True
+    s = milk_random_cow(msg, sfw=sfw)
+    dataToStdout(random_colorama(s) + "\n\n")
 
-    try:
-        baseproxy.serve_forever()
-    except KeyboardInterrupt:
-        scanner.join(0.1)
-        threading.Thread(target=baseproxy.shutdown, daemon=True).start()
-        deinit()
-        print("\n[*] User quit")
-    baseproxy.server_close()
+```
+![](images/banner.jpg)
+
+这个很酷啊 有颜色和随机的图案  
+
+
+### load_file_to_module 另一种动态加载插件的方式  
+
+使用util通过模块的名字和路径来导入模块    
+```python
+    module_name = 'plugin_{0}'.format(get_filename(file_path, with_ext=False))
+    spec = importlib.util.spec_from_file_location(module_name, file_path, loader=PocLoader(module_name, file_path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 ```
 
-是以代理形式的 那么我们需要看下被动代理创建任务的地方  
-位置是在 `W13SCAN/lib/proxy/baseproxy.py#L473`的 `do_GET`方法  
-将这个方法改成了所有的get post方法都使用这个`do_get`方法   
+### 解析post数据类型
+是 `FakeReq` 解析请求里的方法  
+`W13SCAN/lib/parse/parse_request.py#L38`  
+
 ```python
-# baseproxy.py#566
-do_HEAD = do_GET
-do_POST = do_GET
-do_PUT = do_GET
-do_DELETE = do_GET
-do_OPTIONS = do_GET
+def _analysis_post(self):
+    post_data = unquote(self._body)
+    if re.search('([^=]+)=([^%s]+%s?)' % (DEFAULT_GET_POST_DELIMITER, DEFAULT_GET_POST_DELIMITER),
+                    post_data):
+        self._post_hint = POST_HINT.NORMAL
+        self._post_data = paramToDict(post_data, place=PLACE.POST, hint=self._post_hint)
+
+    elif re.search(JSON_RECOGNITION_REGEX, post_data):
+        self._post_hint = POST_HINT.JSON
+
+    elif re.search(XML_RECOGNITION_REGEX, post_data):
+        self._post_hint = POST_HINT.XML
+
+    elif re.search(JSON_LIKE_RECOGNITION_REGEX, post_data):
+        self._post_hint = POST_HINT.JSON_LIKE
+
+    elif re.search(ARRAY_LIKE_RECOGNITION_REGEX, post_data):
+        self._post_hint = POST_HINT.ARRAY_LIKE
+        self._post_data = paramToDict(post_data, place=PLACE.POST, hint=self.post_hint)
+
+    elif re.search(MULTIPART_RECOGNITION_REGEX, post_data):
+        self._post_hint = POST_HINT.MULTIPART
 ```
 
-在请求响应完这里推了任务  
+### raw方法
+是 `FakeReq` 解析请求里的方法  
+`W13SCAN/lib/parse/parse_request.py#L93`  
+返回一个raw数据 类似burp的请求包  
+
 ```python
-req = FakeReq(url, request._headers, method, request.get_body_data().decode('utf-8'))
-resp = FakeResp(int(response.status), response.get_body_data(), response._headers)
-KB['task_queue'].put(('loader', req, resp))
+@property
+def raw(self):
+    # Build request
+    req_data = '%s %s %s\r\n' % (self.method, self._uri, self._request_version)
+    # Add headers to the request
+    for k, v in self._headers.items():
+        req_data += k + ': ' + v + '\r\n'
+    req_data += '\r\n'
+    req_data += self._body
+    return req_data
+```
+
+### text 自动解码响应体  
+是 `FakeResp` 解析请求里的方法  
+获取响应体内容  
+`W13SCAN/lib/parse/parse_responnse.py#L44`  
+```python
+    @property
+    def text(self):
+        if self._decoding:
+            try:
+                return self._body.decode(self._decoding)
+            except Exception as e:
+                return self._body.decode('utf-8', "ignore")
+        return self._body.decode('utf-8', "ignore")
 ```
 
 
-也就是说被动代理是每次流量请求响应完就会推任务到loader 然后loader再次解析推送任务  
-
-
-
-
-
-
-
-
-
-
-
-## 有用好玩的一些方法
-
-### paramsCombination 组合dict参数,将相关类型参数组合成requests认识的,防止request将参数进行url转义
+### 将参数拆分为名称和值 返回字典
+是 插件父类的方法  
 ```python
-def paramsCombination(self, data: dict, place=PLACE.GET, payloads=[], hint=POST_HINT.NORMAL, urlsafe='/\\'):
+def paramToDict(parameters, place=PLACE.GET, hint=POST_HINT.NORMAL) -> dict:
     """
-    组合dict参数,将相关类型参数组合成requests认识的,防止request将参数进行url转义
-
-    :param data:
-    :param hint:
-    :return: payloads -> list
+    Split the parameters into names and values, check if these parameters
+    are within the testable parameters and return in a dictionary.
     """
-    result = []
-    if place == PLACE.POST:
-        if hint == POST_HINT.NORMAL:
-            for key, value in data.items():
-                new_data = copy.deepcopy(data)
-                for payload in payloads:
-                    new_data[key] = payload
-                    result.append((key, value, payload, new_data))
-        elif hint == POST_HINT.JSON:
-            for payload in payloads:
-                for new_data in updateJsonObjectFromStr(data, payload):
-                    result.append(('', '', payload, new_data))
+
+    testableParameters = {}
+    if place == PLACE.COOKIE:
+        splitParams = parameters.split(DEFAULT_COOKIE_DELIMITER)
+        for element in splitParams:
+            parts = element.split("=")
+            if len(parts) >= 2:
+                testableParameters[parts[0]] = ''.join(parts[1:])
     elif place == PLACE.GET:
-        for payload in payloads:
-            for key in data.keys():
-                temp = ""
-                for k, v in data.items():
-                    if k == key:
-                        temp += "{}={}{} ".format(k, quote(payload, safe=urlsafe), DEFAULT_GET_POST_DELIMITER)
+        splitParams = parameters.split(DEFAULT_GET_POST_DELIMITER)
+        for element in splitParams:
+            parts = element.split("=")
+            if len(parts) >= 2:
+                testableParameters[parts[0]] = ''.join(parts[1:])
+    elif place == PLACE.POST:
+        if hint == POST_HINT.NORMAL:
+            splitParams = parameters.split(DEFAULT_GET_POST_DELIMITER)
+            for element in splitParams:
+                parts = element.split("=")
+                if len(parts) >= 2:
+                    testableParameters[parts[0]] = ''.join(parts[1:])
+        elif hint == POST_HINT.ARRAY_LIKE:
+            splitParams = parameters.split(DEFAULT_GET_POST_DELIMITER)
+            for element in splitParams:
+                parts = element.split("=")
+                if len(parts) >= 2:
+                    key = parts[0]
+                    value = ''.join(parts[1:])
+                    if '[' in key:
+                        if key not in testableParameters:
+                            testableParameters[key] = []
+                        testableParameters[key].append(value)
                     else:
-                        temp += "{}={}{} ".format(k, quote(v, safe=urlsafe), DEFAULT_GET_POST_DELIMITER)
-                temp = temp.rstrip(DEFAULT_GET_POST_DELIMITER)
-                result.append((key, data[key], payload, temp))
-    elif place == PLACE.COOKIE:
-        for payload in payloads:
-            for key in data.keys():
-                temp = ""
-                for k, v in data.items():
-                    if k == key:
-                        temp += "{}={}{}".format(k, quote(payload, safe=urlsafe), DEFAULT_COOKIE_DELIMITER)
-                    else:
-                        temp += "{}={}{}".format(k, quote(v, safe=urlsafe), DEFAULT_COOKIE_DELIMITER)
-                result.append((key, data[key], payload, temp))
-    elif place == PLACE.URI:
-        uris = splitUrlPath(data, flag="<--flag-->")
-        for payload in payloads:
-            for uri in uris:
-                uri = uri.replace("<--flag-->", payload)
-                result.append(("", "", payload, uri))
-    return result
+                        testableParameters[key] = value
+    return testableParameters
 ```
 
-### generateItemdatas 输出可以接收统一的参数和位置 以便给 paramsCombination 使用
-
-```python
-def generateItemdatas(self, params=None):
-    iterdatas = []
-    if self.requests.method == HTTPMETHOD.GET:
-        _params = params or self.requests.params
-        iterdatas.append((_params, PLACE.GET))
-    elif self.requests.method == HTTPMETHOD.POST:
-        _params = params or self.requests.post_data
-        iterdatas.append((_params, PLACE.POST))
-    if conf.level >= 3:
-        _params = self.requests.cookies
-        iterdatas.append((_params, PLACE.COOKIE))
-    # if conf.level >= 4:
-    #     # for uri
-    #     iterdatas.append((self.requests.url, PLACE.URI))
-    return iterdatas
-```
+### 对url去重泛化模块
+`W13SCAN/lib/core/spiderset.py`
 
 
+### 代理模块
+代理模块很好用  
 
+### xss 语法语义的形式
 
+### 等等 
+w13scan值得学习的太多了 对于自己的扫描器设计又有了一些想法 并且也可以抄很多代码  
 
-
-
-
-### get_middle_text 获取中间文本
-```python
-def get_middle_text(text, prefix, suffix, index=0):
-    """
-    获取中间文本的简单实现
-
-    :param text:要获取的全文本
-    :param prefix:要获取文本的前部分
-    :param suffix:要获取文本的后半部分
-    :param index:从哪个位置获取
-    :return:
-    """
-    try:
-        index_1 = text.index(prefix, index)
-        index_2 = text.index(suffix, index_1 + len(prefix))
-    except ValueError:
-        # logger.log(CUSTOM_LOGGING.ERROR, "text not found pro:{} suffix:{}".format(prefix, suffix))
-        return ''
-    return text[index_1 + len(prefix):index_2]
-```
-
-### 随机数据
-
-```python
-def random_str(length=10, chars=string.ascii_lowercase):
-    return ''.join(random.sample(chars, length))
-
-
-def random_num(nums):
-    return int(random_str(length=int(nums), chars=string.digits))
-
-
-def random_UA():
-    ua_list = [
-        'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.101',
-        'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/38.0.2125.122',
-        'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.71',
-        'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95',
-        'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.1 (KHTML, like Gecko) Chrome/21.0.1180.71',
-        'Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; QQDownload 732; .NET4.0C; .NET4.0E)',
-        'Mozilla/5.0 (Windows NT 5.1; U; en; rv:1.8.1) Gecko/20061208 Firefox/2.0.0 Opera 9.50',
-        'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:34.0) Gecko/20100101 Firefox/34.0',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 '
-        'Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_13_6) AppleWebKit/537.36 (KHTML, like Gecko) '
-        'Chrome/76.0.3809.100 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/76.0.3809.100 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:54.0) Gecko/20100101 Firefox/68.0',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.13; rv:61.0) Gecko/20100101 Firefox/68.0',
-        'Mozilla/5.0 (X11; Linux i586; rv:31.0) Gecko/20100101 Firefox/68.0',
-    ]
-    return random.choice(ua_list)
-
-```
-
-
-### removeDynamicContent 去除页面多余数据减少相似度计算影响
-
-```python
-def removeDynamicContent(self, page):
-    """
-    Removing dynamic content from supplied page basing removal on
-    precalculated dynamic markings
-    """
-
-    if page:
-        for item in self.dynamic:
-            prefix, suffix = item
-            if prefix is None and suffix is None:
-                continue
-            elif prefix is None:
-                page = re.sub(r"(?s)^.+%s" % re.escape(suffix), suffix.replace('\\', r'\\'), page)
-            elif suffix is None:
-                page = re.sub(r"(?s)%s.+$" % re.escape(prefix), prefix.replace('\\', r'\\'), page)
-            else:
-                page = re.sub(r"(?s)%s.+%s" % (re.escape(prefix), re.escape(suffix)),
-                                "%s%s" % (prefix.replace('\\', r'\\'), suffix.replace('\\', r'\\')), page)
-
-    return page
-```
-
-### getFilteredPageContent 去掉html多余标签
-
-```python
-def getFilteredPageContent(page, onlyText=True, split=" "):
-    """
-    Returns filtered page content without script, style and/or comments
-    or all HTML tags
-    >>> getFilteredPageContent(u'<html><title>foobar</title><body>test</body></html>')
-    u'foobar test'
-    """
-
-    retVal = page
-
-    # only if the page's charset has been successfully identified
-    retVal = re.sub(
-        r"(?si)<script.+?</script>|<!--.+?-->|<style.+?</style>%s" % (r"|<[^>]+>|\t|\n|\r" if onlyText else ""),
-        split, page)
-    while retVal.find(2 * split) != -1:
-        retVal = retVal.replace(2 * split, split)
-    retVal = htmlunescape(retVal.strip().strip(split))
-
-    return retVal
-```
-
-### sensitive_page_error_message_check 匹配报错信息  
-
-```python
-def sensitive_page_error_message_check(source) -> list:
-    errors = [
-        {'regex': '"Message":"Invalid web service call', 'type': 'ASP.Net'},
-        {'regex': 'Exception of type', 'type': 'ASP.Net'},
-        {'regex': '--- End of inner exception stack trace ---', 'type': 'ASP.Net'},
-        {'regex': 'Microsoft OLE DB Provider', 'type': 'ASP.Net'},
-        {'regex': 'Error ([\d-]+) \([\dA-Fa-f]+\)', 'type': 'ASP.Net'},
-        {'regex': 'at ([a-zA-Z0-9_]*\.)*([a-zA-Z0-9_]+)\([a-zA-Z0-9, \[\]\&\;]*\)', 'type': 'ASP.Net'},
-        {'regex': '([A-Za-z]+[.])+[A-Za-z]*Exception: ', 'type': 'ASP.Net'},
-        {'regex': 'in [A-Za-z]:\([A-Za-z0-9_]+\)+[A-Za-z0-9_\-]+(\.aspx)?\.cs:line [\d]+', 'type': 'ASP.Net'},
-        {'regex': 'Syntax error in string in query expression', 'type': 'ASP.Net'},
-        {'regex': '\.java:[0-9]+', 'type': 'Java'}, {'regex': '\.java\((Inlined )?Compiled Code\)', 'type': 'Java'},
-        {'regex': '\.invoke\(Unknown Source\)', 'type': 'Java'}, {'regex': 'nested exception is', 'type': 'Java'},
-        {'regex': '\.js:[0-9]+:[0-9]+', 'type': 'Javascript'}, {'regex': 'JBWEB[0-9]{{6}}:', 'type': 'JBoss'},
-        {'regex': '((dn|dc|cn|ou|uid|o|c)=[\w\d]*,\s?){2,}', 'type': 'LDAP'},
-        {'regex': '\[(ODBC SQL Server Driver|SQL Server|ODBC Driver Manager)\]', 'type': 'Microsoft SQL Server'},
-        {'regex': 'Cannot initialize the data source object of OLE DB provider "[\w]*" for linked server "[\w]*"',
-         'type': 'Microsoft SQL Server'}, {
-            'regex': 'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near',
-            'type': 'MySQL'},
-        {'regex': 'Illegal mix of collations \([\w\s\,]+\) and \([\w\s\,]+\) for operation', 'type': 'MySQL'},
-        {'regex': 'at (\/[A-Za-z0-9\.]+)*\.pm line [0-9]+', 'type': 'Perl'},
-        {'regex': '\.php on line [0-9]+', 'type': 'PHP'}, {'regex': '\.php</b> on line <b>[0-9]+', 'type': 'PHP'},
-        {'regex': 'Fatal error:', 'type': 'PHP'}, {'regex': '\.php:[0-9]+', 'type': 'PHP'},
-        {'regex': 'Traceback \(most recent call last\):', 'type': 'Python'},
-        {'regex': 'File "[A-Za-z0-9\-_\./]*", line [0-9]+, in', 'type': 'Python'},
-        {'regex': '\.rb:[0-9]+:in', 'type': 'Ruby'}, {'regex': '\.scala:[0-9]+', 'type': 'Scala'},
-        {'regex': '\(generated by waitress\)', 'type': 'Waitress Python server'}, {
-            'regex': '132120c8|38ad52fa|38cf013d|38cf0259|38cf025a|38cf025b|38cf025c|38cf025d|38cf025e|38cf025f|38cf0421|38cf0424|38cf0425|38cf0427|38cf0428|38cf0432|38cf0434|38cf0437|38cf0439|38cf0442|38cf07aa|38cf08cc|38cf04d7|38cf04c6|websealerror',
-            'type': 'WebSEAL'},
-        {'type': 'ASPNETPathDisclosure',
-         'regex': "<title>Invalid\sfile\sname\sfor\smonitoring:\s'([^']*)'\.\sFile\snames\sfor\smonitoring\smust\shave\sabsolute\spaths\,\sand\sno\swildcards\.<\/title>"},
-        {'type': 'Struts2DevMod',
-         'regex': 'You are seeing this page because development mode is enabled.  Development mode, or devMode, enables extra'},
-        {'type': 'Django DEBUG MODEL',
-         'regex': "You're seeing this error because you have <code>DEBUG = True<\/code> in"},
-        {'type': 'RailsDevMode', 'regex': '<title>Action Controller: Exception caught<\/title>'},
-        {'type': 'RequiredParameter', 'regex': "Required\s\w+\sparameter\s'([^']+?)'\sis\snot\spresent"},
-        {'type': 'Thinkphp3 Debug', 'regex': '<p class="face">:\(</p>'},
-        {'type': 'xdebug', "regex": "class='xdebug-error xe-fatal-error'"}
-    ]
-    r = []
-    for error in errors:
-        regex = error["regex"]
-        _type = error["type"]
-        result = re.search(regex, source, re.I)
-        if result:
-            r.append({
-                "text": result.group(),
-                "type": _type
-            })
-    return r
-
-```
